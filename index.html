@@ -79,37 +79,111 @@
       padding: 2px 5px;
       font-size: 0.82rem;
       border-radius: 4px;
+      cursor: pointer;
+    }
+    /* Event details modal */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(31, 35, 40, 0.45);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .modal-backdrop.open {
+      display: flex;
+    }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      max-width: 420px;
+      width: 100%;
+      padding: 20px;
+      box-shadow: 0 8px 24px rgba(31, 35, 40, 0.2);
+    }
+    .modal h2 {
+      margin: 0 0 8px;
+      font-size: 1.15rem;
+    }
+    .modal-meta {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .modal-notes {
+      font-size: 0.92rem;
+      line-height: 1.45;
+      margin-bottom: 16px;
+      white-space: pre-wrap;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .btn {
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      font-weight: 500;
+      text-decoration: none;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .btn-primary {
+      background: #0969da;
+      border-color: #0969da;
+      color: #ffffff;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1>Team Leave Calendar</h1>
+      <h1>Team Leave &amp; Meetings</h1>
       <div class="legend">
+        <span class="legend-item"><span class="swatch" style="background:#d97706;"></span>Meeting</span>
         <span class="legend-item"><span class="swatch" style="background:#0969da;"></span>Annual</span>
         <span class="legend-item"><span class="swatch" style="background:#bf3989;"></span>Sick</span>
-        <span class="legend-item"><span class="swatch" style="background:#1a7f37;"></span>Other</span>
+        <span class="legend-item"><span class="swatch" style="background:#1a7f37;"></span>Other Leave</span>
       </div>
     </div>
     <div id="error-banner"></div>
     <div id="calendar"></div>
   </div>
 
+  <div id="event-modal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal">
+      <h2 id="modal-title"></h2>
+      <div id="modal-meta" class="modal-meta"></div>
+      <div id="modal-notes" class="modal-notes"></div>
+      <div class="modal-actions">
+        <a id="modal-link" class="btn btn-primary" href="#" target="_blank" rel="noopener noreferrer">Join Meeting</a>
+        <button id="modal-close" class="btn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
   <script>
-    const TYPE_COLORS = {
+    const LEAVE_COLORS = {
       annual: '#0969da',
       sick: '#bf3989',
       default: '#1a7f37'
     };
+    const MEETING_COLOR = '#d97706';
 
-    function getColor(type) {
-      if (!type) return TYPE_COLORS.default;
+    function getLeaveColor(type) {
+      if (!type) return LEAVE_COLORS.default;
       const key = String(type).trim().toLowerCase();
-      for (const [label, color] of Object.entries(TYPE_COLORS)) {
+      for (const [label, color] of Object.entries(LEAVE_COLORS)) {
         if (key.includes(label)) return color;
       }
-      return TYPE_COLORS.default;
+      return LEAVE_COLORS.default;
     }
 
     function toIsoDate(val) {
@@ -125,38 +199,118 @@
       return next.toISOString().slice(0, 10);
     }
 
-    async function loadLeaveEvents() {
-      const response = await fetch(`./leave.yml?t=${Date.now()}`);
-      if (!response.ok) {
-        throw new Error(`Could not load leave.yml (HTTP ${response.status})`);
-      }
-      const yamlText = await response.text();
-      const entries = jsyaml.load(yamlText) || [];
+    function normalizeTime(val) {
+      const raw = String(val).trim();
+      const parts = raw.split(':');
+      const hh = parts[0].padStart(2, '0');
+      const mm = (parts[1] || '00').padStart(2, '0');
+      const ss = (parts[2] || '00').padStart(2, '0');
+      return `${hh}:${mm}:${ss}`;
+    }
 
-      return entries.map((item) => {
-        const start = toIsoDate(item.start);
-        const end = addOneDay(toIsoDate(item.end || item.start));
+    async function fetchYaml(path, optional = false) {
+      const response = await fetch(`${path}?t=${Date.now()}`);
+      if (!response.ok) {
+        if (optional && response.status === 404) return [];
+        throw new Error(`Could not load ${path} (HTTP ${response.status})`);
+      }
+      const text = await response.text();
+      return jsyaml.load(text) || [];
+    }
+
+    async function loadAllEvents() {
+      const [leaveEntries, meetingEntries] = await Promise.all([
+        fetchYaml('./leave.yml', false),
+        fetchYaml('./meetings.yml', true)
+      ]);
+
+      const leaveEvents = leaveEntries.map((item) => {
+        const startDate = toIsoDate(item.start);
+        const endDate = toIsoDate(item.end || item.start);
         const type = item.type || 'Leave';
+        const color = getLeaveColor(type);
+
         return {
           title: `${item.name} (${type})`,
-          start,
-          end,
+          start: startDate,
+          end: addOneDay(endDate),
           allDay: true,
-          backgroundColor: getColor(type),
-          borderColor: getColor(type)
+          backgroundColor: color,
+          borderColor: color,
+          extendedProps: {
+            kind: 'Leave',
+            when: startDate === endDate ? startDate : `${startDate} to ${endDate}`,
+            notes: item.notes || '',
+            link: ''
+          }
         };
       });
+
+      const meetingEvents = meetingEntries.map((item) => {
+        const dateStr = toIsoDate(item.date);
+        const startTime = normalizeTime(item.start);
+        const startIso = `${dateStr}T${startTime}`;
+        const endIso = item.end ? `${dateStr}T${normalizeTime(item.end)}` : undefined;
+        const whenLabel = item.end
+          ? `${dateStr} · ${String(item.start)} – ${String(item.end)}`
+          : `${dateStr} · ${String(item.start)}`;
+
+        return {
+          title: item.title,
+          start: startIso,
+          end: endIso,
+          allDay: false,
+          backgroundColor: MEETING_COLOR,
+          borderColor: MEETING_COLOR,
+          extendedProps: {
+            kind: 'Meeting',
+            when: whenLabel,
+            notes: item.notes || '',
+            link: item.link || ''
+          }
+        };
+      });
+
+      return [...leaveEvents, ...meetingEvents];
+    }
+
+    function openModal(event) {
+      const { when, notes, link } = event.extendedProps;
+      document.getElementById('modal-title').textContent = event.title;
+      document.getElementById('modal-meta').textContent = when;
+
+      const notesEl = document.getElementById('modal-notes');
+      notesEl.textContent = notes;
+      notesEl.style.display = notes ? 'block' : 'none';
+
+      const linkEl = document.getElementById('modal-link');
+      if (link && /^https?:\/\//i.test(link)) {
+        linkEl.href = link;
+        linkEl.style.display = 'inline-block';
+      } else {
+        linkEl.style.display = 'none';
+      }
+
+      document.getElementById('event-modal').classList.add('open');
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
       const calendarEl = document.getElementById('calendar');
       const errorEl = document.getElementById('error-banner');
+      const modalEl = document.getElementById('event-modal');
+
+      document.getElementById('modal-close').addEventListener('click', () => {
+        modalEl.classList.remove('open');
+      });
+      modalEl.addEventListener('click', (e) => {
+        if (e.target === modalEl) modalEl.classList.remove('open');
+      });
 
       let events = [];
       try {
-        events = await loadLeaveEvents();
+        events = await loadAllEvents();
       } catch (err) {
-        errorEl.textContent = `Failed to load team leave data: ${err.message}`;
+        errorEl.textContent = `Failed to load calendar data: ${err.message}`;
         errorEl.style.display = 'block';
       }
 
@@ -164,10 +318,19 @@
         initialView: 'dayGridMonth',
         firstDay: 1,
         height: 'auto',
+        eventTimeFormat: {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        },
         headerToolbar: {
           left: 'prev,next today',
           center: 'title',
-          right: 'dayGridMonth,listMonth'
+          right: 'dayGridMonth,timeGridWeek,listMonth'
+        },
+        eventClick: (info) => {
+          info.jsEvent.preventDefault();
+          openModal(info.event);
         },
         events
       });
