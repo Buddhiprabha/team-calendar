@@ -1,0 +1,9 @@
+- name: Buddhi
+  start: 2026-12-21
+  end: 2026-12-24
+  type: Annual Leave
+
+- name: Erabadda
+  start: 2027-01-04
+  end: 2027-01-05
+  type: Personal Leave
