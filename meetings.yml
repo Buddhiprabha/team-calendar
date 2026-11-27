@@ -1,0 +1,22 @@
+# Recurring weekly meeting (runs indefinitely)
+- title: Bioinformatics Weekly Meeting
+  day: Tuesday
+  start: "02:00"
+  end: "03:00"
+  link: https://meet.google.com/abc-defg-hij
+  notes: Sprint progress and blockers
+
+# Recurring meeting on multiple days with a start and end date
+# - title: Standup
+#   days: [Monday, Thursday]
+#   start: "09:30"
+#   end: "09:45"
+#   start_date: 2026-12-01
+#   end_date: 2027-02-28
+
+# # One-off meeting
+# - title: XYZ Paper Review
+#   date: 2026-12-04
+#   start: "14:00"
+#   end: "15:00"
+#   notes: Review XYZ paper rebuttal
