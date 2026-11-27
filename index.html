@@ -177,6 +177,17 @@
     };
     const MEETING_COLOR = '#d97706';
 
+    const DAY_MAP = {
+      sun: 0, sunday: 0,
+      mon: 1, monday: 1,
+      tue: 2, tues: 2, tuesday: 2,
+      wed: 3, wednesday: 3,
+      thu: 4, thur: 4, thurs: 4, thursday: 4,
+      fri: 5, friday: 5,
+      sat: 6, saturday: 6
+    };
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
     function getLeaveColor(type) {
       if (!type) return LEAVE_COLORS.default;
       const key = String(type).trim().toLowerCase();
@@ -206,6 +217,20 @@
       const mm = (parts[1] || '00').padStart(2, '0');
       const ss = (parts[2] || '00').padStart(2, '0');
       return `${hh}:${mm}:${ss}`;
+    }
+
+    function parseDaysOfWeek(item) {
+      const raw = item.days ?? item.day;
+      if (raw === undefined || raw === null) return null;
+      const list = Array.isArray(raw) ? raw : [raw];
+      const parsed = list
+        .map((d) => {
+          if (typeof d === 'number') return d;
+          const key = String(d).trim().toLowerCase();
+          return key in DAY_MAP ? DAY_MAP[key] : Number(key);
+        })
+        .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+      return parsed.length ? parsed : null;
     }
 
     async function fetchYaml(path, optional = false) {
@@ -238,7 +263,7 @@
           backgroundColor: color,
           borderColor: color,
           extendedProps: {
-            kind: 'Leave',
+            isRecurring: false,
             when: startDate === endDate ? startDate : `${startDate} to ${endDate}`,
             notes: item.notes || '',
             link: ''
@@ -246,15 +271,42 @@
         };
       });
 
-      const meetingEvents = meetingEntries.map((item) => {
+      const meetingEvents = meetingEntries.map((item, idx) => {
+        const daysOfWeek = parseDaysOfWeek(item);
+        const timeLabel = item.end
+          ? `${String(item.start)} – ${String(item.end)}`
+          : String(item.start);
+      
+        if (daysOfWeek) {
+          const dayLabels = daysOfWeek.map((d) => DAY_NAMES[d]).join(', ');
+          const startDate = item.start_date || item.startDate;
+          const endDate = item.end_date || item.endDate;
+      
+          return {
+            groupId: `recurring-meeting-${idx}`,
+            title: item.title,
+            daysOfWeek,
+            startTime: normalizeTime(item.start),
+            endTime: item.end ? normalizeTime(item.end) : undefined,
+            startRecur: startDate ? toIsoDate(startDate) : undefined,
+            endRecur: endDate ? addOneDay(toIsoDate(endDate)) : undefined,
+            allDay: false,
+            backgroundColor: MEETING_COLOR,
+            borderColor: MEETING_COLOR,
+            extendedProps: {
+              isRecurring: true,
+              scheduleLabel: `Every ${dayLabels}`,
+              timeLabel,
+              notes: item.notes || '',
+              link: item.link || ''
+            }
+          };
+        }
+      
         const dateStr = toIsoDate(item.date);
-        const startTime = normalizeTime(item.start);
-        const startIso = `${dateStr}T${startTime}`;
+        const startIso = `${dateStr}T${normalizeTime(item.start)}`;
         const endIso = item.end ? `${dateStr}T${normalizeTime(item.end)}` : undefined;
-        const whenLabel = item.end
-          ? `${dateStr} · ${String(item.start)} – ${String(item.end)}`
-          : `${dateStr} · ${String(item.start)}`;
-
+      
         return {
           title: item.title,
           start: startIso,
@@ -263,8 +315,8 @@
           backgroundColor: MEETING_COLOR,
           borderColor: MEETING_COLOR,
           extendedProps: {
-            kind: 'Meeting',
-            when: whenLabel,
+            isRecurring: false,
+            when: `${dateStr} · ${timeLabel}`,
             notes: item.notes || '',
             link: item.link || ''
           }
@@ -275,9 +327,13 @@
     }
 
     function openModal(event) {
-      const { when, notes, link } = event.extendedProps;
+      const { isRecurring, scheduleLabel, timeLabel, when, notes, link } = event.extendedProps;
+      const metaText = isRecurring
+        ? `${event.startStr.slice(0, 10)} (${scheduleLabel}) · ${timeLabel}`
+        : when;
+      
       document.getElementById('modal-title').textContent = event.title;
-      document.getElementById('modal-meta').textContent = when;
+      document.getElementById('modal-meta').textContent = metaText;
 
       const notesEl = document.getElementById('modal-notes');
       notesEl.textContent = notes;
